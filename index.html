@@ -2,95 +2,143 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>1231TROM – 母指ROM</title>
+<title>1231TROM – Thumb ROM Analyzer</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 
 <style>
-body{background:#111;color:#eee;font-family:system-ui;padding:16px;margin:0}
-h1{font-size:18px}
-.section{background:#1e1e1e;padding:12px;border-radius:10px;margin-bottom:12px}
-button{background:#333;color:#fff;border:none;border-radius:8px;padding:8px 12px}
+body{
+  background:#111;color:#eee;
+  font-family:system-ui,-apple-system;
+  padding:16px;margin:0;
+}
+h1{font-size:18px;margin-bottom:8px}
+.section{
+  background:#1e1e1e;
+  padding:12px;border-radius:10px;
+  margin-bottom:12px;
+}
+button{
+  background:#333;color:#fff;
+  border:none;border-radius:8px;
+  padding:8px 12px;font-size:13px;
+}
 button:hover{background:#555}
+.note{font-size:12px;color:#bbb;margin-top:6px}
 #result{line-height:1.6}
-#hud{position:fixed;top:8px;left:8px;font-size:11px;color:#9f9}
-#tools{position:fixed;right:12px;bottom:12px;display:flex;gap:10px}
 </style>
 </head>
 
 <body>
-<h1>母指 可動域評価（1231TROM）</h1>
 
+<h1>母指 可動域解析（1231TROM）</h1>
+
+<!-- ① MP / IP -->
 <div class="section">
-<b>① MP / IP（屈曲・伸展）</b><br>
+<b>① MP / IP 屈曲・伸展</b><br>
 <input type="file" id="video1" accept="video/*">
-<button onclick="runMPIP()">解析</button>
+<button onclick="analyzeMPIP()">解析</button>
 </div>
 
+<!-- ② CMC 掌側外転 -->
 <div class="section">
-<b>② CMC 掌側外転</b><br>
+<b>② CMC 掌側外転（JOA準拠）</b><br>
 <input type="file" id="video2" accept="video/*">
-<button onclick="runCMC2()">解析</button>
+<button onclick="analyzeCMC('palmar')">解析</button>
+<div class="note">※ 初期肢位との差の最大角度（符号なし）</div>
 </div>
 
+<!-- ③ CMC 橈側外転 -->
 <div class="section">
-<b>③ CMC 橈側外転</b><br>
+<b>③ CMC 橈側外転（JOA準拠）</b><br>
 <input type="file" id="video3" accept="video/*">
-<button onclick="runCMC3()">解析</button>
+<button onclick="analyzeCMC('radial')">解析</button>
+<div class="note">※ 初期肢位との差の最大角度（符号なし）</div>
 </div>
 
+<!-- ④ 対立 -->
 <div class="section">
 <b>④ 母指対立（JOA準拠・自己記載）</b><br>
-母指指尖が到達した部位を選択してください。<br>
+母指指尖が到達した部位を選択してください。<br><br>
 <label><input type="radio" name="opp"> 示指基部</label><br>
 <label><input type="radio" name="opp"> 中指基部</label><br>
 <label><input type="radio" name="opp"> 薬指基部</label><br>
 <label><input type="radio" name="opp"> 小指基部</label>
 </div>
 
-<div class="section" id="result">結果表示</div>
-
-<div id="hud"></div>
-
-<div id="tools">
-<button onclick="copyDebugLog()">ログコピー</button>
-<button onclick="toggleJOA()">JOA参考値</button>
-</div>
-
-<div class="section" id="joa" style="display:none">
-<b>JOA 参考可動域</b><br>
-MP：屈曲 60° / 伸展 10°<br>
-IP：屈曲 80° / 伸展 20°<br>
-CMC外転：40°
+<div class="section" id="result">
+解析結果がここに表示されます
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="Analyze.js"></script>
 
-<script type="module">
-import {
-  initDebug,copyDebugLog,
-  analyzeMPIP,analyzeCMC
-} from "./Analyze.js";
+<script>
+/* ===== 共通 ===== */
+function innerAngle(a,b,c){
+  const ab={x:a.x-b.x,y:a.y-b.y,z:(a.z||0)-(b.z||0)};
+  const cb={x:c.x-b.x,y:c.y-b.y,z:(c.z||0)-(b.z||0)};
+  const dot=ab.x*cb.x+ab.y*cb.y+ab.z*cb.z;
+  const mag=Math.hypot(ab.x,ab.y,ab.z)*Math.hypot(cb.x,cb.y,cb.z);
+  if(!isFinite(dot/mag)) return null;
+  return Math.acos(dot/mag)*180/Math.PI;
+}
 
-window.copyDebugLog = copyDebugLog;
+/* ===== ① MP / IP ===== */
+async function analyzeMPIP(){
+  const file=document.getElementById("video1").files[0];
+  if(!file)return;
 
-window.onload=()=>initDebug("hud");
+  let MP=[],IP=[];
+  await processVideo(file,res=>{
+    if(!res.multiHandLandmarks)return;
+    const lm=res.multiHandLandmarks[0];
+    const palm=lm[0];
+    const mp=innerAngle(palm,lm[2],lm[3]);
+    const ip=innerAngle(lm[2],lm[3],lm[4]);
+    if(mp!=null)MP.push(mp);
+    if(ip!=null)IP.push(ip);
+  });
 
-window.runMPIP=()=>{
-  const f=document.getElementById("video1").files[0];
-  if(f) analyzeMPIP(f,"result");
-};
-window.runCMC2=()=>{
-  const f=document.getElementById("video2").files[0];
-  if(f) analyzeCMC(f,"result","② CMC 掌側外転");
-};
-window.runCMC3=()=>{
-  const f=document.getElementById("video3").files[0];
-  if(f) analyzeCMC(f,"result","③ CMC 橈側外転");
-};
-window.toggleJOA=()=>{
-  const e=document.getElementById("joa");
-  e.style.display=(e.style.display==="none")?"block":"none";
-};
+  const flex=x=>180-Math.min(...x);
+  const ext=x=>Math.max(0,Math.max(...x)-180);
+
+  result.innerHTML=`
+  <b>① MP / IP</b><br>
+  MP：屈曲 ${flex(MP).toFixed(1)}° / 伸展 ${ext(MP).toFixed(1)}°<br>
+  IP：屈曲 ${flex(IP).toFixed(1)}° / 伸展 ${ext(IP).toFixed(1)}°
+  `;
+}
+
+/* ===== ②③ CMC 外転（修正版） ===== */
+async function analyzeCMC(type){
+  const id = type==="palmar" ? "video2" : "video3";
+  const label = type==="palmar" ? "② CMC 掌側外転" : "③ CMC 橈側外転";
+  const file=document.getElementById(id).files[0];
+  if(!file)return;
+
+  let angles=[];
+  await processVideo(file,res=>{
+    if(!res.multiHandLandmarks)return;
+    const lm=res.multiHandLandmarks[0];
+
+    // CMC：舟状骨想定点(0) – 母指MP(2) – 母指IP(3)
+    const a=innerAngle(lm[0],lm[2],lm[3]);
+    if(a!=null)angles.push(a);
+  });
+
+  if(angles.length<2){
+    result.innerHTML+=`<br><br>${label}：測定不能`;
+    return;
+  }
+
+  const base = angles[0];
+  const abd = Math.max(...angles.map(v=>Math.abs(v-base)));
+
+  result.innerHTML+=`
+  <br><br><b>${label}</b><br>
+  外転角：${abd.toFixed(1)}°
+  `;
+}
 </script>
 
 </body>
