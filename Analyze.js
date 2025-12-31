@@ -1,49 +1,34 @@
-// ===== Analyze.js =====
-let DEBUG_LOG = [];
-let HUD = null;
+// Analyze.js
+let LOG = [];
+let hudEl = null;
 
-/* ===== Debug ===== */
 export function initDebug(hudId){
-  HUD = document.getElementById(hudId);
-  DEBUG_LOG = [];
-  log("debug initialized");
+  hudEl = document.getElementById(hudId);
+  log("debug init");
 }
 
 function log(msg){
   const t = new Date().toLocaleTimeString();
-  const line = `[${t}] ${msg}`;
-  DEBUG_LOG.push(line);
-  if(HUD) HUD.innerText = line;
+  LOG.push(`[${t}] ${msg}`);
+  if(hudEl) hudEl.textContent = LOG[LOG.length-1];
 }
 
 export function copyDebugLog(){
-  navigator.clipboard.writeText(DEBUG_LOG.join("\n"));
-  alert("ログをコピーしました");
+  navigator.clipboard.writeText(LOG.join("\n"));
+  alert("デバッグログをコピーしました");
 }
 
-/* ===== Utils ===== */
-function innerAngle(a,b,c){
-  const ab={x:a.x-b.x,y:a.y-b.y,z:(a.z||0)-(b.z||0)};
-  const cb={x:c.x-b.x,y:c.y-b.y,z:(c.z||0)-(b.z||0)};
-  const dot=ab.x*cb.x+ab.y*cb.y+ab.z*cb.z;
-  const mag=Math.hypot(ab.x,ab.y,ab.z)*Math.hypot(cb.x,cb.y,cb.z);
-  if(!isFinite(dot/mag)) return null;
-  return Math.acos(dot/mag)*180/Math.PI;
+function angle2D(v1, v2){
+  const dot = v1.x*v2.x + v1.y*v2.y;
+  const m = Math.hypot(v1.x,v1.y)*Math.hypot(v2.x,v2.y);
+  if(!m) return null;
+  return Math.acos(dot/m)*180/Math.PI;
 }
 
-async function seekVideo(video,time){
-  return new Promise(res=>{
-    const h=()=>{video.removeEventListener("seeked",h);res();};
-    video.addEventListener("seeked",h);
-    video.currentTime=time;
-  });
-}
-
-async function processVideo(file,onResults){
+async function processVideo(file, cb){
   const video=document.createElement("video");
   video.src=URL.createObjectURL(file);
   await video.play();
-  log(`video loaded (${video.duration.toFixed(2)}s)`);
 
   const canvas=document.createElement("canvas");
   const ctx=canvas.getContext("2d");
@@ -52,75 +37,64 @@ async function processVideo(file,onResults){
     locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
   });
   hands.setOptions({maxNumHands:1,modelComplexity:1});
+  hands.onResults(cb);
 
-  hands.onResults(onResults);
-
-  const FPS=2;
-  for(let t=0;t<video.duration;t+=1/FPS){
+  for(let t=0;t<video.duration;t+=0.5){
     log(`seek ${t.toFixed(2)}s`);
-    await seekVideo(video,t);
+    video.currentTime=t;
+    await new Promise(r=>video.onseeked=r);
     canvas.width=video.videoWidth;
     canvas.height=video.videoHeight;
     ctx.drawImage(video,0,0);
-    try{
-      await hands.send({image:canvas});
-    }catch(e){
-      log("hands.send failed");
-    }
+    await hands.send({image:canvas});
   }
 }
 
-/* ===== ① MP / IP ===== */
-export async function analyzeMPIP(file,resultId){
-  log("analyzeMPIP start");
-  const out=document.getElementById(resultId);
-
+/* ① MP / IP */
+export async function analyzeMPIP(file, outId){
+  log("analyze MP/IP start");
   let MP=[],IP=[];
   await processVideo(file,res=>{
     if(!res.multiHandLandmarks) return;
     const lm=res.multiHandLandmarks[0];
-    const mp=innerAngle(lm[0],lm[2],lm[3]);
-    const ip=innerAngle(lm[2],lm[3],lm[4]);
-    if(mp!=null) MP.push(mp);
-    if(ip!=null) IP.push(ip);
+    const ang=(a,b,c)=>{
+      const ab={x:a.x-b.x,y:a.y-b.y};
+      const cb={x:c.x-b.x,y:c.y-b.y};
+      return angle2D(ab,cb);
+    };
+    const mp=ang(lm[0],lm[2],lm[3]);
+    const ip=ang(lm[2],lm[3],lm[4]);
+    if(mp) MP.push(mp);
+    if(ip) IP.push(ip);
   });
-
   const flex=x=>180-Math.min(...x);
-  const ext=x=>Math.max(0,Math.max(...x)-180);
-
-  out.innerHTML=`
-  <b>① MP / IP</b><br>
-  MP：屈曲 ${flex(MP).toFixed(1)}° / 伸展 ${ext(MP).toFixed(1)}°<br>
-  IP：屈曲 ${flex(IP).toFixed(1)}° / 伸展 ${ext(IP).toFixed(1)}°
-  `;
-  log("analyzeMPIP finished");
+  const ext=x=>Math.max(...x)-180;
+  document.getElementById(outId).innerHTML=
+  `① MP/IP<br>
+   MP：屈曲 ${flex(MP).toFixed(1)}° / 伸展 ${ext(MP).toFixed(1)}°<br>
+   IP：屈曲 ${flex(IP).toFixed(1)}° / 伸展 ${ext(IP).toFixed(1)}°`;
+  log("analyze MP/IP end");
 }
 
-/* ===== ②③ CMC 外転（JOA準拠・符号なし） ===== */
-export async function analyzeCMC(file,resultId,label){
-  log(`${label} start`);
-  const out=document.getElementById(resultId);
-
-  let angles=[];
+/* ②③ CMC（示指0°基準・JOA準拠） */
+export async function analyzeCMC(file, outId, label){
+  log(`analyze ${label} start`);
+  let vals=[];
   await processVideo(file,res=>{
     if(!res.multiHandLandmarks) return;
     const lm=res.multiHandLandmarks[0];
-    const a=innerAngle(lm[0],lm[2],lm[3]); // CMC想定
-    if(a!=null) angles.push(a);
+
+    // 示指MC方向（0°基準）
+    const idx={x:lm[5].x-lm[0].x,y:lm[5].y-lm[0].y};
+    // 母指MC方向
+    const th ={x:lm[2].x-lm[0].x,y:lm[2].y-lm[0].y};
+
+    const ang=angle2D(idx,th);
+    if(ang!=null) vals.push(Math.abs(180-ang));
   });
 
-  if(angles.length<2){
-    out.innerHTML+=`<br><br>${label}：測定不能`;
-    log(`${label} failed`);
-    return;
-  }
-
-  const base=angles[0];
-  const abd=Math.max(...angles.map(v=>Math.abs(v-base)));
-
-  out.innerHTML+=`
-  <br><br><b>${label}</b><br>
-  外転角：${abd.toFixed(1)}°
-  `;
-  log(`${label} finished`);
+  const v=Math.max(...vals);
+  document.getElementById(outId).innerHTML+=
+  `<br>${label}：${v.toFixed(1)}°`;
+  log(`analyze ${label} end`);
 }
