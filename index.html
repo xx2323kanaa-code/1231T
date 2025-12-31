@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>1231TROM – 母指ROM</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+
+<style>
+body{background:#111;color:#eee;font-family:system-ui;padding:16px;margin:0}
+h1{font-size:18px}
+.section{background:#1e1e1e;padding:12px;border-radius:10px;margin-bottom:12px}
+button{background:#333;color:#fff;border:none;border-radius:8px;padding:8px 12px}
+button:hover{background:#555}
+#result{line-height:1.6}
+#hud{position:fixed;top:8px;left:8px;font-size:11px;color:#9f9}
+#tools{position:fixed;right:12px;bottom:12px;display:flex;gap:10px}
+</style>
+</head>
+
+<body>
+<h1>母指 可動域評価（1231TROM）</h1>
+
+<div class="section">
+<b>① MP / IP（屈曲・伸展）</b><br>
+<input type="file" id="video1" accept="video/*">
+<button onclick="runMPIP()">解析</button>
+</div>
+
+<div class="section">
+<b>② CMC 掌側外転</b><br>
+<input type="file" id="video2" accept="video/*">
+<button onclick="runCMC2()">解析</button>
+</div>
+
+<div class="section">
+<b>③ CMC 橈側外転</b><br>
+<input type="file" id="video3" accept="video/*">
+<button onclick="runCMC3()">解析</button>
+</div>
+
+<div class="section">
+<b>④ 母指対立（JOA準拠・自己記載）</b><br>
+母指指尖が到達した部位を選択してください。<br>
+<label><input type="radio" name="opp"> 示指基部</label><br>
+<label><input type="radio" name="opp"> 中指基部</label><br>
+<label><input type="radio" name="opp"> 薬指基部</label><br>
+<label><input type="radio" name="opp"> 小指基部</label>
+</div>
+
+<div class="section" id="result">結果表示</div>
+
+<div id="hud"></div>
+
+<div id="tools">
+<button onclick="copyDebugLog()">ログコピー</button>
+<button onclick="toggleJOA()">JOA参考値</button>
+</div>
+
+<div class="section" id="joa" style="display:none">
+<b>JOA 参考可動域</b><br>
+MP：屈曲 60° / 伸展 10°<br>
+IP：屈曲 80° / 伸展 20°<br>
+CMC外転：40°
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script type="module">
+import {
+  initDebug,copyDebugLog,
+  analyzeMPIP,analyzeCMC
+} from "./Analyze.js";
+
+window.copyDebugLog = copyDebugLog;
+
+window.onload=()=>initDebug("hud");
+
+window.runMPIP=()=>{
+  const f=document.getElementById("video1").files[0];
+  if(f) analyzeMPIP(f,"result");
+};
+window.runCMC2=()=>{
+  const f=document.getElementById("video2").files[0];
+  if(f) analyzeCMC(f,"result","② CMC 掌側外転");
+};
+window.runCMC3=()=>{
+  const f=document.getElementById("video3").files[0];
+  if(f) analyzeCMC(f,"result","③ CMC 橈側外転");
+};
+window.toggleJOA=()=>{
+  const e=document.getElementById("joa");
+  e.style.display=(e.style.display==="none")?"block":"none";
+};
+</script>
+
+</body>
+</html>
